@@ -1,4 +1,4 @@
-# Weather-Prediction
+# Energy Consumption Forecasting
 
 For this project, we ahve been hired by eSc, which is a ficticious company that provides electricity. They are concrened with the environmental effects of Global Warming and thus want to incentivise reduced energy consumption. 
 
