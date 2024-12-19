@@ -1,0 +1,802 @@
+---
+title: "Imputation"
+author: "Ishaan Lodhi"
+date: "2024-11-16"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#Enable all packages here
+library(tidyverse)
+library(arrow)
+library(imputeTS)
+```
+
+```{r}
+#File 1
+file_1 <- read_parquet("/Users/ishaan/Downloads/part-1.parquet")
+col_drop <- c("in.city", "in.clothes_washer_presence", "in.county_and_puma", "in.federal_poverty_level", "in.geometry_floor_area_bin", "in.geometry_stories_low_rise", "in.income_recs_2015", "in.income_recs_2020", "in.puma", "in.puma_metro_status", "in.vintage")
+file_1 <- file_1[, !colnames(file_1) %in% col_drop]
+head(file_1)
+gc()
+```
+
+```{r}
+file_2 <- read_parquet("/Users/ishaan/Downloads/part-2.parquet")
+file_2 <- file_2[, !colnames(file_2) %in% col_drop]
+gc()
+```
+
+```{r}
+file_3 <- read_parquet("/Users/ishaan/Downloads/part-3.parquet")
+file_3 <- file_3[, !colnames(file_3) %in% col_drop]
+gc()
+```
+
+```{r}
+file_4 <- read_parquet("/Users/ishaan/Downloads/part-4.parquet")
+file_4 <- file_4[, !colnames(file_4) %in% col_drop]
+gc()
+```
+
+```{r}
+file_5 <- read_parquet("/Users/ishaan/Downloads/part-5.parquet")
+file_5 <- file_5[, !colnames(file_5) %in% col_drop]
+gc()
+```
+
+```{r}
+file_6 <- read_parquet("/Users/ishaan/Downloads/part-6.parquet")
+file_6 <- file_6[, !colnames(file_6) %in% col_drop]
+gc()
+```
+
+```{r}
+file_7 <- read_parquet("/Users/ishaan/Downloads/part-7.parquet")
+file_7 <- file_7[, !colnames(file_7) %in% col_drop]
+gc()
+```
+
+```{r}
+file_8 <- read_parquet("/Users/ishaan/Downloads/part-8.parquet")
+file_8 <- file_8[, !colnames(file_8) %in% col_drop]
+gc()
+```
+
+```{r}
+file_9 <- read_parquet("/Users/ishaan/Downloads/part-9.parquet")
+file_9 <- file_9[, !colnames(file_9) %in% col_drop]
+gc()
+```
+
+```{r}
+file_10 <- read_parquet("/Users/ishaan/Downloads/part-10.parquet")
+file_10 <- file_10[, !colnames(file_10) %in% col_drop]
+head(file_10)
+gc()
+```
+
+```{r}
+colnames(file_10)[colSums(is.na(file_10)) > 0]
+```
+
+```{r}
+colnames(file_10)[sapply(file_10, function(col) {
+  is.character(col) && any(col == "None", na.rm = TRUE)
+})]
+```
+
+**Replacing "None" by 0 to ease conversion to integer.**
+```{r}
+file_1$in.pv_system_size[file_1$in.pv_system_size == "None"] <- 0
+file_2$in.pv_system_size[file_2$in.pv_system_size == "None"] <- 0
+file_3$in.pv_system_size[file_3$in.pv_system_size == "None"] <- 0
+file_4$in.pv_system_size[file_4$in.pv_system_size == "None"] <- 0
+file_5$in.pv_system_size[file_5$in.pv_system_size == "None"] <- 0
+file_6$in.pv_system_size[file_6$in.pv_system_size == "None"] <- 0
+file_7$in.pv_system_size[file_7$in.pv_system_size == "None"] <- 0
+file_8$in.pv_system_size[file_8$in.pv_system_size == "None"] <- 0
+file_9$in.pv_system_size[file_9$in.pv_system_size == "None"] <- 0
+file_10$in.pv_system_size[file_10$in.pv_system_size == "None"] <- 0
+```
+
+**Function to remove character values from a column and cast it to int**
+
+```{r}
+clean_and_convert_to_integer <- function(data, columns_to_clean) {
+  # `columns_to_clean` should be a named list where the name is the column name
+  # and the value is a vector of characters to remove for that column
+  
+  for (column_name in names(columns_to_clean)) {
+    # Check if the column exists in the data frame
+    if (!column_name %in% colnames(data)) {
+      warning(paste("Column", column_name, "not found in the data frame. Skipping."))
+      next
+    }
+    
+    # Ensure the column is character or numeric
+    if (!is.character(data[[column_name]]) && !is.numeric(data[[column_name]])) {
+      warning(paste("Column", column_name, "is not character or numeric. Skipping."))
+      next
+    }
+    
+    # Get the list of characters to remove for the column
+    characters_to_remove <- columns_to_clean[[column_name]]
+    
+    # Replace each specified character in the column
+    for (char in characters_to_remove) {
+      data[[column_name]] <- gsub(char, "", data[[column_name]])
+    }
+   
+    # Convert the column to integer
+    data[[column_name]] <- as.integer(data[[column_name]])
+  }
+  
+  # Return the modified data frame
+  return(data)
+}
+
+```
+
+
+**Defining the columns to clean**
+```{r}
+# Define the columns and their respective characters to remove
+int_columns_to_clean <- list(
+  "in.bathroom_spot_vent_hour" = c("Hour"),
+  "in.cooling_setpoint" = c("F"), 
+  "in.cooling_setpoint_offset_magnitude" = c("F"),
+  "in.heating_setpoint" = c("F"), 
+  "in.heating_setpoint_offset_magnitude" = c("F"), 
+  "in.plug_load_diversity" = c("%"), 
+  "in.range_spot_vent_hour" = c("Hour"), 
+  "in.infiltration" = c(" ACH50"), 
+  "in.occupants" = c("+"),
+  "in.pv_system_size" = c(".0 kWDC")
+)
+```
+
+**Function to convert character variables with 2 values to a factor**
+
+```{r}
+convert_character_columns_to_factors <- function(data, columns_to_convert, custom_levels = NULL) {
+  # `columns_to_convert` should be a vector of column names to convert
+  # `custom_levels` is a named list specifying custom levels for certain columns
+  
+  for (column_name in columns_to_convert) {
+    # Check if the column exists in the data frame
+    if (!column_name %in% colnames(data)) {
+      warning(paste("Column", column_name, "not found in the data frame. Skipping."))
+      next
+    }
+    
+    # Ensure the column is character
+    if (!is.character(data[[column_name]])) {
+      warning(paste("Column", column_name, "is not a character column. Skipping."))
+      next
+    }
+    
+    # Get the unique values in the column
+    unique_values <- unique(data[[column_name]])
+    
+    # Check if the column has exactly two unique values
+    if (length(unique_values) != 2) {
+      warning(paste("Column", column_name, "does not have exactly two unique values. Skipping."))
+      next
+    }
+    
+    # Determine the levels for the factor
+    if (!is.null(custom_levels) && column_name %in% names(custom_levels)) {
+      levels <- custom_levels[[column_name]]
+    } else {
+      levels <- sort(unique_values)  # Default to alphabetical order if no custom levels provided
+    }
+    
+    # Convert the column to a factor with specified levels
+    data[[column_name]] <- factor(data[[column_name]], levels = levels, labels = c(0, 1), ordered = TRUE)
+  }
+  
+  # Return the modified data frame
+  return(data)
+}
+
+
+```
+
+**Defining the columns to clean**
+```{r}
+# Define the columns to convert
+binary_columns_to_convert <- c( "in.cooling_setpoint_has_offset", "in.has_pv", "in.heating_setpoint_has_offset", 
+                         "in.hvac_has_ducts", "in.hvac_has_zonal_electric_heating", "in.misc_gas_fireplace",
+                         "in.misc_gas_grill", "in.misc_gas_lighting", "in.misc_pool", "in.misc_pool_pump", 
+                         "in.misc_well_pump", "in.tenure", "in.vacancy_status")
+
+# Define custom levels
+binary_custom_levels <- list(
+  in.cooling_setpoint_has_offset = c("No", "Yes"),
+  in.has_pv = c("No", "Yes"), 
+  in.heating_setpoint_has_offset = c("No", "Yes"),
+  in.hvac_has_ducts = c("No", "Yes"),
+  in.hvac_has_zonal_electric_heating = c("No", "Yes"),
+  in.misc_gas_fireplace = c("None", "Gas Fireplace"), 
+  in.misc_gas_grill = c("None", "Gas Grill"), 
+  in.misc_gas_lighting = c("None", "Gas Lighting"), 
+  in.misc_pool = c("None", "1.0 HP Pump"),
+  in.misc_well_pump = c("None", "Typical Efficiency"), 
+  in.tenure = c("Renter", "Owner"), 
+  in.vacancy_status = c("Vacant", "Occupied")
+)
+```
+
+**Using gsub() to convert all the fuel columns to Electricity and "Other Fuel"**
+
+```{r}
+#File 1
+file_1$in.clothes_dryer <- gsub("Gas", "Propane", file_1$in.clothes_dryer)
+file_1$in.clothes_dryer <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_1$in.clothes_dryer)
+file_1$in.clothes_dryer <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_1$in.clothes_dryer)
+
+file_1$in.cooking_range <- gsub("Gas", "Propane", file_1$in.cooking_range)
+file_1$in.cooking_range <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_1$in.cooking_range)
+file_1$in.cooking_range <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_1$in.cooking_range)
+
+file_1$in.heating_fuel <- gsub("Natural Gas", "Other Fuel", file_1$in.heating_fuel)
+file_1$in.heating_fuel <- gsub("Fuel Oil", "Other Fuel", file_1$in.heating_fuel)
+file_1$in.heating_fuel <- gsub("Propane", "Other Fuel", file_1$in.heating_fuel)
+
+#File 2
+file_2$in.clothes_dryer <- gsub("Gas", "Propane", file_2$in.clothes_dryer)
+file_2$in.clothes_dryer <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_2$in.clothes_dryer)
+file_2$in.clothes_dryer <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_2$in.clothes_dryer)
+
+file_2$in.cooking_range <- gsub("Gas", "Propane", file_2$in.cooking_range)
+file_2$in.cooking_range <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_2$in.cooking_range)
+file_2$in.cooking_range <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_2$in.cooking_range)
+
+file_2$in.heating_fuel <- gsub("Natural Gas", "Other Fuel", file_2$in.heating_fuel)
+file_2$in.heating_fuel <- gsub("Fuel Oil", "Other Fuel", file_2$in.heating_fuel)
+file_2$in.heating_fuel <- gsub("Propane", "Other Fuel", file_2$in.heating_fuel)
+
+#File 3
+file_3$in.clothes_dryer <- gsub("Gas", "Propane", file_3$in.clothes_dryer)
+file_3$in.clothes_dryer <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_3$in.clothes_dryer)
+file_3$in.clothes_dryer <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_3$in.clothes_dryer)
+
+file_3$in.cooking_range <- gsub("Gas", "Propane", file_3$in.cooking_range)
+file_3$in.cooking_range <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_3$in.cooking_range)
+file_3$in.cooking_range <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_3$in.cooking_range)
+
+file_3$in.heating_fuel <- gsub("Natural Gas", "Other Fuel", file_3$in.heating_fuel)
+file_3$in.heating_fuel <- gsub("Fuel Oil", "Other Fuel", file_3$in.heating_fuel)
+file_3$in.heating_fuel <- gsub("Propane", "Other Fuel", file_3$in.heating_fuel)
+
+#File 4
+file_4$in.clothes_dryer <- gsub("Gas", "Propane", file_4$in.clothes_dryer)
+file_4$in.clothes_dryer <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_4$in.clothes_dryer)
+file_4$in.clothes_dryer <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_4$in.clothes_dryer)
+
+file_4$in.cooking_range <- gsub("Gas", "Propane", file_4$in.cooking_range)
+file_4$in.cooking_range <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_4$in.cooking_range)
+file_4$in.cooking_range <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_4$in.cooking_range)
+
+file_4$in.heating_fuel <- gsub("Natural Gas", "Other Fuel", file_4$in.heating_fuel)
+file_4$in.heating_fuel <- gsub("Fuel Oil", "Other Fuel", file_4$in.heating_fuel)
+file_4$in.heating_fuel <- gsub("Propane", "Other Fuel", file_4$in.heating_fuel)
+
+#File 5
+file_5$in.clothes_dryer <- gsub("Gas", "Propane", file_5$in.clothes_dryer)
+file_5$in.clothes_dryer <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_5$in.clothes_dryer)
+file_5$in.clothes_dryer <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_5$in.clothes_dryer)
+
+file_5$in.cooking_range <- gsub("Gas", "Propane", file_5$in.cooking_range)
+file_5$in.cooking_range <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_5$in.cooking_range)
+file_5$in.cooking_range <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_5$in.cooking_range)
+
+file_5$in.heating_fuel <- gsub("Natural Gas", "Other Fuel", file_5$in.heating_fuel)
+file_5$in.heating_fuel <- gsub("Fuel Oil", "Other Fuel", file_5$in.heating_fuel)
+file_5$in.heating_fuel <- gsub("Propane", "Other Fuel", file_5$in.heating_fuel)
+
+#File 6
+file_6$in.clothes_dryer <- gsub("Gas", "Propane", file_6$in.clothes_dryer)
+file_6$in.clothes_dryer <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_6$in.clothes_dryer)
+file_6$in.clothes_dryer <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_6$in.clothes_dryer)
+
+file_6$in.cooking_range <- gsub("Gas", "Propane", file_6$in.cooking_range)
+file_6$in.cooking_range <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_6$in.cooking_range)
+file_6$in.cooking_range <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_6$in.cooking_range)
+
+file_6$in.heating_fuel <- gsub("Natural Gas", "Other Fuel", file_6$in.heating_fuel)
+file_6$in.heating_fuel <- gsub("Fuel Oil", "Other Fuel", file_6$in.heating_fuel)
+file_6$in.heating_fuel <- gsub("Propane", "Other Fuel", file_6$in.heating_fuel)
+
+#File 7
+file_7$in.clothes_dryer <- gsub("Gas", "Propane", file_7$in.clothes_dryer)
+file_7$in.clothes_dryer <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_7$in.clothes_dryer)
+file_7$in.clothes_dryer <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_7$in.clothes_dryer)
+
+file_7$in.cooking_range <- gsub("Gas", "Propane", file_7$in.cooking_range)
+file_7$in.cooking_range <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_7$in.cooking_range)
+file_7$in.cooking_range <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_7$in.cooking_range)
+
+file_7$in.heating_fuel <- gsub("Natural Gas", "Other Fuel", file_7$in.heating_fuel)
+file_7$in.heating_fuel <- gsub("Fuel Oil", "Other Fuel", file_7$in.heating_fuel)
+file_7$in.heating_fuel <- gsub("Propane", "Other Fuel", file_7$in.heating_fuel)
+
+#File 8
+file_8$in.clothes_dryer <- gsub("Gas", "Propane", file_8$in.clothes_dryer)
+file_8$in.clothes_dryer <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_8$in.clothes_dryer)
+file_8$in.clothes_dryer <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_8$in.clothes_dryer)
+
+file_8$in.cooking_range <- gsub("Gas", "Propane", file_8$in.cooking_range)
+file_8$in.cooking_range <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_8$in.cooking_range)
+file_8$in.cooking_range <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_8$in.cooking_range)
+
+file_8$in.heating_fuel <- gsub("Natural Gas", "Other Fuel", file_8$in.heating_fuel)
+file_8$in.heating_fuel <- gsub("Fuel Oil", "Other Fuel", file_8$in.heating_fuel)
+file_8$in.heating_fuel <- gsub("Propane", "Other Fuel", file_8$in.heating_fuel)
+
+#File 9
+file_9$in.clothes_dryer <- gsub("Gas", "Propane", file_9$in.clothes_dryer)
+file_9$in.clothes_dryer <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_9$in.clothes_dryer)
+file_9$in.clothes_dryer <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_9$in.clothes_dryer)
+
+file_9$in.cooking_range <- gsub("Gas", "Propane", file_9$in.cooking_range)
+file_9$in.cooking_range <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_9$in.cooking_range)
+file_9$in.cooking_range <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_9$in.cooking_range)
+
+file_9$in.heating_fuel <- gsub("Natural Gas", "Other Fuel", file_9$in.heating_fuel)
+file_9$in.heating_fuel <- gsub("Fuel Oil", "Other Fuel", file_9$in.heating_fuel)
+file_9$in.heating_fuel <- gsub("Propane", "Other Fuel", file_9$in.heating_fuel)
+
+#File 10
+file_10$in.clothes_dryer <- gsub("Gas", "Propane", file_10$in.clothes_dryer)
+file_10$in.clothes_dryer <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_10$in.clothes_dryer)
+file_10$in.clothes_dryer <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_10$in.clothes_dryer)
+
+file_10$in.cooking_range <- gsub("Gas", "Propane", file_10$in.cooking_range)
+file_10$in.cooking_range <- gsub("Propane, 80% Usage", "Propane, 120% Usage", file_10$in.cooking_range)
+file_10$in.cooking_range <- gsub("Propane, 100% Usage", "Propane, 120% Usage", file_10$in.cooking_range)
+
+file_10$in.heating_fuel <- gsub("Natural Gas", "Other Fuel", file_10$in.heating_fuel)
+file_10$in.heating_fuel <- gsub("Fuel Oil", "Other Fuel", file_10$in.heating_fuel)
+file_10$in.heating_fuel <- gsub("Propane", "Other Fuel", file_10$in.heating_fuel)
+
+
+```
+
+**Income column has a discrepancy. One value within it says <10000 but all values are above 10000 anyways. Should it be <100000 or  >10000 instead?**
+
+**Converting "None" to NA in these columns as it is not an allowable value**
+
+```{r}
+#These columns having "None" makes no sense, thus they're being converted to NA before the column is cast as a factor
+
+file_1$in.ducts[file_1$in.ducts == "None"] <- NA
+file_1$in.geometry_wall_exterior_finish[file_1$in.geometry_wall_exterior_finish == "None"] <- NA
+file_1$in.heating_fuel[file_1$in.heating_fuel == "None"] <- NA
+file_1$in.hvac_heating_efficiency[file_1$in.hvac_heating_efficiency == "Other"] <- NA
+file_1$in.insulation_ceiling[file_1$in.insulation_ceiling == "None"] <- NA
+file_1$in.insulation_floor[file_1$in.insulation_floor == "None"] <- NA
+file_1$in.insulation_foundation_wall[file_1$in.insulation_foundation_wall == "None"] <- NA
+file_1$in.insulation_rim_joist[file_1$in.insulation_rim_joist == "None"] <- NA
+file_1$in.insulation_slab[file_1$in.insulation_slab == "NA"] <- NA
+file_1$in.water_heater_efficiency[file_1$in.water_heater_efficiency == "Other Fuel"] <- NA
+file_1$in.water_heater_fuel[file_1$in.water_heater_fuel == "Other Fuel"] <- NA
+
+```
+
+**Function to convert all columns with a valid "None" entry to factor with levels starting from 0**
+
+```{r}
+convert_with_none <- function(data, columns_to_convert, custom_levels) {
+  # `columns_to_convert` is a vector of column names
+  # `custom_levels` is a named list where each column has its sorted levels
+  
+  for (column_name in columns_to_convert) {
+    # Check if the column exists in the data frame
+    if (!column_name %in% colnames(data)) {
+      warning(paste("Column", column_name, "not found in the data frame. Skipping."))
+      next
+    }
+    
+    # Ensure the column is character
+    if (!is.character(data[[column_name]])) {
+      warning(paste("Column", column_name, "is not a character column. Skipping."))
+      next
+    }
+    
+    # Get the custom levels for the column
+    if (!column_name %in% names(custom_levels)) {
+      warning(paste("No custom levels provided for column", column_name, "Skipping."))
+      next
+    }
+    
+    levels <- custom_levels[[column_name]]
+    
+    # Convert to factor with levels starting from 0
+    data[[column_name]] <- factor(data[[column_name]], levels = levels, labels = seq_along(levels) - 1)
+  }
+  return(data)
+}
+
+```
+
+**All columns with valid NA values and their respective customized levels**
+
+```{r}
+valid_none_columns_to_convert <- c("in.ceiling_fan", "in.clothes_washer", "in.dishwasher", "in.geometry_attic_type", "in.geometry_garage",
+                                   "in.hvac_cooling_efficiency","in.hvac_cooling_partial_space_conditioning","in.hvac_cooling_type",
+                                   "in.hvac_heating_efficiency","in.hvac_heating_type","in.hvac_heating_type_and_fuel",
+                                   "in.misc_extra_refrigerator","in.misc_freezer", "in.misc_hot_tub_spa", "in.misc_pool_heater",
+                                   "in.refrigerator")
+  
+valid_none_custom_levels <- list(
+  in.ceiling_fan = c("None", "Standard Efficiency, No Usage", "Standard Efficiency"),
+  in.clothes_washer = c("None", "EnergyStar, 80% Usage", "EnergyStar, 100% Usage", "EnergyStar, 120% Usage",  "Standard, 80%
+                        Usage", "Standard, 100% Usage", "Standard, 120% Usage"), 
+  in.dishwasher = c("None", "290 Rated kWh, 80% Usage", "318 Rated kWh, 80% Usage", "290 Rated kWh, 100% Usage", "318 Rated kWh, 100% Usage",
+                    "290 Rated kWh, 120% Usage", "318 Rated kWh, 120% Usage"),
+  in.geometry_attic_type = c("None", "Finished Attic or Cathedral Ceilings", "Vented Attic"),
+  in.geometry_garage = c("None", "1 Car", "2 Car", "3 Car"), 
+  in.hvac_cooling_efficiency = c("None", "AC, SEER 8", "AC, SEER 10", "AC, SEER 13", "AC, SEER 15", "Room AC, EER 8.5", 
+                                 "Room AC, EER 9.8", "Room AC, EER 10.7", "Room AC, EER 12.0", "Heat Pump", "Shared Cooling"),
+  in.hvac_cooling_partial_space_conditioning = c("None", "<10% Conditioned", "20% Conditioned", "40% Conditioned", "60%
+                                                 Conditioned", "80% Conditioned", "100% Conditioned"),
+  in.hvac_cooling_type = c("None", "Room AC", "Heating Pump", "Cantral AC"),
+  in.hvac_heating_efficiency = c("None", "Shared Heating", "Fuel Furnace, 92.5% AFUE", "Fuel Wall/Floor Furnace, 92.5% AFUE", "Fuel
+                                 Furnace, 80%AFUE","Fuel Wall/Floor Furnace, 80% AFUE", "Fuel Boiler, 90% AFUE", "Fuel Furnace, 76%
+                                 AFUE","Fuel Boiler, 80% AFUE", "Fuel Wall/Floor Furnace, 68% AFUE", "ASHP, SEER 15, 8.5
+                                 HSPF","ASHP, SEER 13, 7.7 HSPF", "ASHP, SEER 10, 6.2 HSPF", "Electric Furnace, 100% AFUE",
+                                 "Electric Boiler, 100% AFUE", "Electric Baseboard, 100% Efficiency", "Electric Wall Furnace, 100%
+                                 AFUE"),
+  in.hvac_heating_type = c("None", "Ducted Heat Pump", "Ducted Heating", "Non-Ducted Heating"), 
+  in.hvac_heating_type_and_fuel = c("None", "Fuel Oil Shared Heating", "Natural Gas Shared Heating", "Propane Shared Heating",
+                                    "Fuel Oil Fuel Wall/Floor Furnace", "Natural Gas Fuel Wall/Floor Furnace", "Propane Fuel
+                                    Wall/Floor Furnace", "Fuel Oil Fuel Furnace", "Natural Gas Fuel Furnace", "Propane Fuel
+                                    Furnace", "Fuel Oil Fuel Boiler", "Natural Gas Fuel Boiler", "Propane Fuel Boiler",
+                                    "Electricity Shared Heating", "Electricity Electric Wall Furnace", "Electricity Electric
+                                    Furnace", "Electricity Electric Boiler", "Electricity Baseboard", "Electricity ASHP"),
+  in.misc_extra_refrigerator = c("None", "EF 19.9", "EF 17.6", "EF 15.9", "EF 10.5", "EF 10.2", "EF 6.7"),
+  in.misc_freezer = c("None", "National Average", "EF 12"),
+  in.misc_hot_tub_spa = c("None", "Gas", "Electricity"),
+  in.misc_pool_heater = c("None", "Solar", "Gas", "Electric"),
+  in.refrigerator = c("None", "EF 19.9, 100% Usage", "EF 17.6, 100% Usage", "EF 15.9, 100% Usage", "EF 10.5, 100% Usage", "EF 10.2, 100%
+                      Usage", "EF 6.7, 100% Usage"))
+```
+
+**Function to convert all columns with invalid "None" entries to factor with levels starting from 1**
+
+```{r}
+convert_without_none <- function(data, columns_to_convert, custom_levels) {
+  # `columns_to_convert` is a vector of column names
+  # `custom_levels` is a named list where each column has its sorted levels
+  
+  for (column_name in columns_to_convert) {
+    # Check if the column exists in the data frame
+    if (!column_name %in% colnames(data)) {
+      warning(paste("Column", column_name, "not found in the data frame. Skipping."))
+      next
+    }
+    
+    # Ensure the column is character
+    if (!is.character(data[[column_name]])) {
+      warning(paste("Column", column_name, "is not a character column. Skipping."))
+      next
+    }
+    
+    # Get the custom levels for the column
+    if (!column_name %in% names(custom_levels)) {
+      warning(paste("No custom levels provided for column", column_name, "Skipping."))
+      next
+    }
+    
+    levels <- custom_levels[[column_name]]
+    
+    # Convert to factor with levels starting from 1
+    data[[column_name]] <- factor(data[[column_name]], levels = levels, labels = seq_along(levels))
+  }
+  return(data)
+}
+
+```
+
+**All columns with invalid NA values and their respective customized levels**
+
+```{r}
+invalid_none_columns_to_convert <- c("in.building_america_climate_zone", "in.clothes_dryer",  "in.cooking_range", "in.ducts",
+                                     "in.geometry_floor_area", "in.geometry_foundation_type", "in.geometry_wall_exterior_finish",
+                                     "in.geometry_wall_type", "in.heating_fuel", "in.hot_water_fixtures", "in.insulation_ceiling",
+                                     "in.insulation_floor","in.insulation_foundation_wall", "in.insulation_rim_joist",
+                                     "in.insulation_roof","in.insulation_slab", "in.insulation_wall", "in.lighting",
+                                     "in.roof_material","in.usage_level", "in.water_heater_efficiency", "in.water_heater_fuel",
+                                     "in.window_areas", "in.windows")
+
+
+
+invalid_none_custom_levels <- list(
+  in.building_america_climate_zone = c("Marine", "Mixed-Humid", "Mixed-Dry", "Hot-Humid", "Hot-Dry", "Cold", "Very Cold"),
+  in.clothes_dryer = c("Propane, 120% Usage", "Electric, 80% Usage", "Electric, 100% Usage", "Electric, 120% Usage"),
+  in.cooking_range = c("Propane, 120% Usage", "Electric, 80% Usage", "Electric, 100% Usage", "Electric, 120% Usage"),
+  in.ducts = c("0% Leakage, Uninsulated", "10% Leakage, R-8", "10% Leakage, R-6,", "10% Leakage, R-4", "20% Leakage, R-8", "30%
+               Leakage, R-8", "20% Leakage, R-6", "20% Leakage, R-4", "30% Leakage, R-6", "10% Leakage, Uninsulated", "20% Leakage,
+               Uninsulated", "30% Leakage, R-4", "30% Leakage, Uninsulated"),
+  in.geometry_floor_area = c("0-499", "500-749", "750-999", "1000-1499", "1500-1999", "2000-2499", "2500-2999", "3000-3999",
+                             "4000+"),
+  in.geometry_foundation_type = c("Ambient", "Slab", "Unvented Crawlspace", "Unheated Basement", "Vented Crawlspace", "Heated Basement"),
+  in.geometry_wall_exterior_finish = c("Aluminum, Light", "Vinyl, Light", "Stucco, Light", "Brick, Light", "Fiber-Cement, Light",
+                                       "Stucco, Medium/Dark", "Brick, Medium/Dark", "Wood, Medium/Dark", "Shingle, Composition,
+                                       Medium", "Shingle, Asbestos, Medium"),
+  in.geometry_wall_type = c("Concrete", "Steel Frame", "Brick", "Wood Frame"),
+  in.heating_fuel = c("Other Fuel", "Electricity"),
+  in.hot_water_fixtures = c("50% Usage", "100% Usage", "200% Usage"),
+  in.insulation_ceiling = c("R-49", "R-38", "R-30", "R-19", "R-13", "R-7", "Uninsulated"),
+  in.insulation_floor = c("Ceiling R-30", "Ceiling R-19", "Ceiling R-13", "Uninsulated"),
+  in.insulation_foundation_wall = c("Wall R-15, Exterior", "Wall R-10, Exterior", "Wall R-5, Exterior", "Uninsulated"),
+  in.insulation_rim_joist = c("Uninsulated", "R-5, Exterior", "R-10, Exterior", "R-15, Exterior"),
+  in.insulation_roof = c("Finished, R-49", "Finished, R-38", "Finished, R-30", "Finished, R-19", "Finished, R-13", "Finished, R-7",
+                         "Finished, Uninsulated", "Unfinished, Uninsulated"),
+  in.insulation_slab = c("2ft R10 Perimeter, Vertical", "2ft R10 Under, Horizontal", "2ft R5 Perimeter, Vertical", "2ft R5 Under,
+                         Horizontal", "Uninsulated"),
+  in.insulation_wall = c("Brick, 12-in, 3-wythe, R-19", "CMU, 6-in Hollow, R-19", "Wood Stud, R-19", "Brick, 12-in, 3-wythe, R-15", "CMU, 6-in
+                         Hollow, R-15", "Wood Stud, R-15", "Brick, 12-in, 3-wythe, R-11", "CMU, 6-in Hollow, R-11", "Wood Stud, R-11", "Brick,
+                         12-in, 3-wythe, R-7", "CMU, 6-in Hollow, R-7", "Wood Stud, R-7", "Brick, 12-in, 3-wythe, Uninsulated", "CMU, 6-in
+                         Hollow, Uninsulated", "Wood Stud, Uninsulated"),
+  in.lighting = c("100% LED", "100% CFL", "100% Incandescent"),
+  in.roof_material = c("Tile, Concrete", "Tile, Clay or Ceramic", "Slate", "Wood Shingles", "Composition Shingles", "Asphalt Shingles,
+                       Medium", "Metal, Dark"),
+  in.usage_level = c("Low", "Medium", "High"), 
+  in.water_heater_efficiency = c("Natural Gas Tankless", "Propane Tankless", "FIXME Fuel Oil Indirect", "Fuel Oil Indirect", "Natural Gas
+                                 Premium", "Propane Premium", "Fuel Oil Premium", "Natural Gas Standard", "Propane Standard", "Fuel Oil
+                                 Standard", "Electric Tankless", "Electric Premium", "Electric Standard", "Electric Heat Pump, 80 gal"),
+  in.water_heater_fuel = c("Natural Gas", "Fuel Oil", "Propane", "Electricity"),
+  in.window_areas = c("F6 B6 L6 R6", "F9 B9 L9 R9", "F12 B12 L12 R12", "F15 B15 L15 R15", "F18 B18 L18 R18", "F30 B30 L30 R30"),
+  in.windows = c("Triple, Low-E, Non-metal, Air, L-Gain", "Double, Low-E, Non-metal, Air, M-Gain", "Double, Clear, Non-metal, Air, Exterior
+                 Clear Storm", "Double, Clear, Non-metal, Air", "Double, Clear, Metal, Air, Exterior Clear Storm", "Double, Clear, Metal,
+                 Air", "Single, Clear, Non-metal", "Single, Clear, Non-metal, Exterior Clear Storm", "Single, Clear, Metal", "Single, Clear,
+                 Metal, Exterior Clear Storm"))
+```
+
+
+**Finally, convert the setpoint columns from string to int by doing the appropriate conversion**
+
+```{r}
+convert_cooling_setpoint_offset_period <- function(data, column_name) {
+  # Define the mapping of characters to integers
+  mapping <- c(
+    "Day Setup" = 8,
+    "Day Setup +1h" = 9,
+    "Day Setup +2h" = 10,
+    "Day Setup +3h" = 11,
+    "Day Setup +4h" = 12,
+    "Day Setup +5h" = 13,
+    "Day Setup -1h" = 7,
+    "Day Setup -2h" = 6,
+    "Day Setup -3h" = 5,
+    "Day Setup -4h" = 4,
+    "Day Setup -5h" = 3,
+    "Day Setup and Night Setback" = 17,
+    "Day Setup and Night Setback +1h" = 18,
+    "Day Setup and Night Setback +2h" = 19,
+    "Day Setup and Night Setback +3h" = 20,
+    "Day Setup and Night Setback +4h" = 21,
+    "Day Setup and Night Setback +5h" = 22,
+    "Day Setup and Night Setback -1h" = 16,
+    "Day Setup and Night Setback -2h" = 15,
+    "Day Setup and Night Setback -3h" = 14,
+    "Day Setup and Night Setback -4h" = 13,
+    "Day Setup and Night Setback -5h" = 12,
+    "Day and Night Setup" = 17,
+    "Day and Night Setup +1h" = 18,
+    "Day and Night Setup +2h" = 19,
+    "Day and Night Setup +3h" = 20,
+    "Day and Night Setup +4h" = 21,
+    "Day and Night Setup +5h" = 22,
+    "Day and Night Setup -1h" = 16,
+    "Day and Night Setup -2h" = 15,
+    "Day and Night Setup -3h" = 14,
+    "Day and Night Setup -4h" = 13,
+    "Day and Night Setup -5h" = 12,
+    "Night Setback" = 9,
+    "Night Setback +1h" = 10,
+    "Night Setback +2h" = 11,
+    "Night Setback +3h" = 12,
+    "Night Setback +4h" = 13,
+    "Night Setback +5h" = 14,
+    "Night Setback -1h" = 8,
+    "Night Setback -2h" = 7,
+    "Night Setback -3h" = 6,
+    "Night Setback -4h" = 5,
+    "Night Setback -5h" = 4,
+    "Night Setup" = 9,
+    "Night Setup +1h" = 10,
+    "Night Setup +2h" = 11,
+    "Night Setup +3h" = 12,
+    "Night Setup +4h" = 13,
+    "Night Setup +5h" = 14,
+    "Night Setup -1h" = 8,
+    "Night Setup -2h" = 7,
+    "Night Setup -3h" = 6,
+    "Night Setup -4h" = 5,
+    "Night Setup -5h" = 4,
+    "None" = 0
+  )
+  
+  # Check if the column exists in the data frame
+  if (!column_name %in% colnames(data)) {
+    stop(paste("Column", column_name, "not found in the data frame."))
+  }
+  
+  # Map the column values to integers using the mapping
+  data[[column_name]] <- sapply(data[[column_name]], function(value) {
+    if (value %in% names(mapping)) {
+      return(mapping[value])
+    } else {
+      warning(paste("Unrecognized value:", value))
+      return(NA)  # Return NA for unrecognized values
+    }
+  })
+  
+  # Ensure the column is numeric
+  data[[column_name]] <- as.numeric(data[[column_name]])
+  
+  return(data)
+}
+```
+
+```{r}
+convert_heating_setpoint_offset_period <- function(data, column_name) {
+  # Define the mapping of characters to integers
+  mapping <- c(
+    "Day" = 8,
+    "Day +1h" = 9,
+    "Day +2h" = 10,
+    "Day +3h" = 11,
+    "Day +4h" = 12,
+    "Day +5h" = 13,
+    "Day -1h" = 7,
+    "Day -2h" = 6,
+    "Day -3h" = 5,
+    "Day -4h" = 4,
+    "Day -5h" = 3,
+    "Day and Night" = 17,
+    "Day and Night +1h" = 18,
+    "Day and Night +2h" = 19,
+    "Day and Night +3h" = 20,
+    "Day and Night +4h" = 21,
+    "Day and Night +5h" = 22,
+    "Day and Night -1h" = 16,
+    "Day and Night -2h" = 15,
+    "Day and Night -3h" = 14,
+    "Day and Night -4h" = 13,
+    "Day and Night -5h" = 12,
+    "Night" = 9,
+    "Night +1h" = 10,
+    "Night +2h" = 11,
+    "Night +3h" = 12,
+    "Night +4h" = 13,
+    "Night +5h" = 14,
+    "Night -1h" = 8,
+    "Night -2h" = 7,
+    "Night -3h" = 6,
+    "Night -4h" = 5,
+    "Night -5h" = 4,
+    "None" = 0
+  )
+
+  
+  # Check if the column exists in the data frame
+  if (!column_name %in% colnames(data)) {
+    stop(paste("Column", column_name, "not found in the data frame."))
+  }
+  
+  # Map the column values to integers using the mapping
+  data[[column_name]] <- sapply(data[[column_name]], function(value) {
+    if (value %in% names(mapping)) {
+      return(mapping[value])
+    } else {
+      warning(paste("Unrecognized value:", value))
+      return(NA)  # Return NA for unrecognized values
+    }
+  })
+  
+  # Ensure the column is numeric
+  data[[column_name]] <- as.numeric(data[[column_name]])
+  
+  return(data)
+}
+```
+
+
+
+**Applying all the functions to each file in order**
+
+```{r}
+#File 1
+file_1 <- clean_and_convert_to_integer(file_1, int_columns_to_clean)
+file_1 <- convert_character_columns_to_factors(file_1, binary_columns_to_convert, binary_custom_levels)
+file_1 <- convert_with_none(file_1, valid_none_columns_to_convert, valid_none_custom_levels)
+file_1 <- convert_without_none(file_1, invalid_none_columns_to_convert, invalid_none_custom_levels)
+file_1 <- convert_cooling_setpoint_offset_period(file_1, "in.cooling_setpoint_offset_period") #ONLY RUN ONCE
+file_1 <- convert_heating_setpoint_offset_period(file_1, "in.heating_setpoint_offset_period") #ONLY RUN ONCE
+```
+
+```{r}
+#File 2
+file_2 <- clean_and_convert_to_integer(file_2, int_columns_to_clean)
+file_2 <- convert_character_columns_to_factors(file_2, binary_columns_to_convert, binary_custom_levels)
+file_2 <- convert_with_none(file_2, valid_none_columns_to_convert, valid_none_custom_levels)
+file_2 <- convert_without_none(file_2, invalid_none_columns_to_convert, invalid_none_custom_levels)
+```
+
+```{r}
+#File 3
+file_3 <- clean_and_convert_to_integer(file_3, int_columns_to_clean)
+file_3 <- convert_character_columns_to_factors(file_2, binary_columns_to_convert, binary_custom_levels)
+file_3<- convert_with_none(file_3, valid_none_columns_to_convert, valid_none_custom_levels)
+file_3 <- convert_without_none(file_3, invalid_none_columns_to_convert, invalid_none_custom_levels)
+```
+
+
+```{r}
+#File 4
+file_4 <- clean_and_convert_to_integer(file_4, int_columns_to_clean)
+file_4 <- convert_character_columns_to_factors(file_4, binary_columns_to_convert, binary_custom_levels)
+file_4 <- convert_with_none(file_4, valid_none_columns_to_convert, valid_none_custom_levels)
+file_4 <- convert_without_none(file_4, invalid_none_columns_to_convert, invalid_none_custom_levels)
+```
+
+
+```{r}
+#File 5
+file_5 <- clean_and_convert_to_integer(file_5, int_columns_to_clean)
+file_5 <- convert_character_columns_to_factors(file_5, binary_columns_to_convert, binary_custom_levels)
+file_5 <- convert_with_none(file_5, valid_none_columns_to_convert, valid_none_custom_levels)
+file_5 <- convert_without_none(file_5, invalid_none_columns_to_convert, invalid_none_custom_levels)
+```
+
+```{r}
+#File 6
+file_6 <- clean_and_convert_to_integer(file_6, int_columns_to_clean)
+file_6 <- convert_character_columns_to_factors(file_6, binary_columns_to_convert, binary_custom_levels)
+file_6 <- convert_with_none(file_6, valid_none_columns_to_convert, valid_none_custom_levels)
+file_6 <- convert_without_none(file_6, invalid_none_columns_to_convert, invalid_none_custom_levels)
+```
+
+```{r}
+#File 7
+file_7 <- clean_and_convert_to_integer(file_7, int_columns_to_clean)
+file_7 <- convert_character_columns_to_factors(file_7, binary_columns_to_convert, binary_custom_levels)
+file_7 <- convert_with_none(file_7, valid_none_columns_to_convert, valid_none_custom_levels)
+file_7 <- convert_without_none(file_7, invalid_none_columns_to_convert, invalid_none_custom_levels)
+```
+
+```{r}
+#File 8
+file_9 <- clean_and_convert_to_integer(file_9, int_columns_to_clean)
+file_9 <- convert_character_columns_to_factors(file_9, binary_columns_to_convert, binary_custom_levels)
+file_9 <- convert_with_none(file_9, valid_none_columns_to_convert, valid_none_custom_levels)
+file_9 <- convert_without_none(file_9, invalid_none_columns_to_convert, invalid_none_custom_levels)
+```
+
+```{r}
+#File 10
+file_10 <- clean_and_convert_to_integer(file_10, int_columns_to_clean)
+file_10 <- convert_character_columns_to_factors(file_10, binary_columns_to_convert, binary_custom_levels)
+file_10 <- convert_with_none(file_10, valid_none_columns_to_convert, valid_none_custom_levels)
+file_10 <- convert_without_none(file_10, invalid_none_columns_to_convert, invalid_none_custom_levels)
+```
+
+```{r}
+which(colSums(is.na(file_1)) > 0)
+```
+```{r}
+weather_columns <- c("Dry Bulb Temperature [°C]", "Relative Humidity [%]", "Wind Speed [m/s]", "Wind Direction [Deg]", "Global Horizontal Radiation [W/m2]", "Direct Normal Radiation [W/m2]", "Diffuse Horizontal Radiation [W/m2]")
+
+file_1[apply(file_1[weather_columns], 1, function(row) all(is.na(row))), ]
+
+```
+

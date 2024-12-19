@@ -1,0 +1,202 @@
+---
+title: "Visualizations"
+author: "Luis Riviere"
+date: "2024-12-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ggplot2)
+library(sf)
+library(tigris)
+library(dplyr)
+```
+All County Energy Consumption Comparison  
+```{r}
+# Example dataset (replace with your actual data)
+set.seed(123)
+data <- data.frame(
+  Hour = rep(0:23, 7),  # Hours of the day for 7 climate zones
+  climate_zone = rep(paste("Zone", 1:7), each = 24),  # 7 climate zones
+  total_energy = c(
+    runif(24, 80, 120),  # Example data for Zone 1
+    runif(24, 70, 110),  # Zone 2
+    runif(24, 60, 100),  # Zone 3
+    runif(24, 50, 90),   # Zone 4
+    runif(24, 40, 80),   # Zone 5
+    runif(24, 30, 70),   # Zone 6
+    runif(24, 20, 60)    # Zone 7
+  )
+)
+
+# Create the line graph
+ggplot(data, aes(x = Hour, y = total_energy, color = climate_zone)) +
+  geom_line(size = 1) +  # Add lines for each climate zone
+  scale_color_manual(values = c("red", "blue", "green", "purple", "orange", "brown", "pink")) +  # Custom colors
+  labs(
+    title = "Total Energy vs Hour by Climate Zone",
+    x = "Hour",
+    y = "Total Energy (kWh)",
+    color = "Climate Zone"
+  ) +
+  scale_y_continuous(expand = expansion(mult = 0.1)) +  # Automatically resize y-axis
+  theme_minimal() +
+  theme(
+    legend.position = "right",  # Move legend to the right
+    plot.title = element_text(size = 16, face = "bold"),  # Enhance title
+    axis.text = element_text(size = 12),  # Resize axis text
+    axis.title = element_text(size = 14)  # Resize axis titles
+  )
+
+
+```
+
+North Carolina Map 
+```{r}
+# Load required libraries
+library(ggplot2)
+library(sf)
+library(tigris)
+library(dplyr)
+
+# Load North Carolina county boundaries
+nc_counties <- counties(state = "NC", cb = TRUE, class = "sf")
+
+# Your building data: Replace this with your actual data
+# Example data frame
+building_data <- data.frame(          #Insert data here
+  building_id = c(1, 2, 3, 4, 5),
+  latitude = c(35.7796, 36.0726, 34.2257, 35.2271, 35.994),
+  longitude = c(-78.6382, -79.792, -77.9447, -80.8431, -78.8986),
+  climate_zone = c("Zone 1", "Zone 2", "Zone 3", "Zone 2", "Zone 1")
+)
+
+# Convert building data to an sf object
+building_sf <- st_as_sf(building_data, coords = c("in.weather_file_longitude", "in.weather_file_latitude"), crs = 4326)
+
+st_crs(building_sf)
+st_crs(nc_counties)
+
+building_sf <- st_transform(building_sf, st_crs(nc_counties))
+# Spatial join: assign each building to a county
+building_counties <- st_join(building_sf, nc_counties)
+
+# Aggregate to determine predominant climate zone for each county
+county_climate_zones <- building_counties %>%
+  group_by(NAME) %>%  # Group by county name
+  summarize(
+    climate_zone = names(sort(table(climate_zone), decreasing = TRUE)[1]) # Predominant climate zone
+  )
+
+nc_counties <- nc_counties %>%
+  left_join(
+    st_drop_geometry(county_climate_zones),  # Drop geometry from the data with climate zones
+    by = "NAME"  # Match by county name
+  )
+
+# Plot the map with filled counties
+ggplot(data = nc_counties) +
+  geom_sf(aes(fill = climate_zone), color = "black") +  # Fill counties by climate zone
+  scale_fill_manual(
+    values = c("1" = "blue", "2" = "green", "3" = "red", "4" = "purple", "5"= "yellow", "6" = "orange", "7" = "pink"),
+    na.value = "gray90"  # Counties without data
+  ) +
+  labs(
+    title = "North Carolina Counties by Climate Zone",
+    fill = "Climate Zone"
+  ) +
+  theme_minimal()
+
+```
+Single Climate Zone sample Hours vs energy 
+
+```{r}
+# Load the ggplot2 library
+library(ggplot2)
+
+# Example dataset (replace with your actual dataset)
+data <- data.frame(
+  Hour = 0:23,  # Hours of the day (0 to 23)
+  total_energy = c(100, 120, 110, 90, 80, 70, 60, 85, 95, 130, 150, 160, 170, 180, 190, 200, 195, 180, 170, 150, 140, 130, 120, 110)  # Example energy usage
+)
+
+# Create the line graph
+ggplot(data, aes(x = Hour, y = total_energy)) +
+  geom_line(color = "blue", size = 1) +  # Line plot
+  geom_point(color = "red", size = 2) +  # Optional: Add points for each hour
+  labs(
+    title = "Total Energy vs Hour of the Day",
+    x = "Hour",
+    y = "Total Energy (kWh)"  # Customize y-axis label based on units
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# Example datasets for current and projected data
+set.seed(123)
+data_current <- data.frame(
+  Hour = rep(0:23, 7),  # Hours of the day for 7 climate zones
+  climate_zone = rep(paste("Zone", 1:7), each = 24),  # 7 climate zones
+  energy_consumption = c(
+    runif(24, 80, 120),  # Zone 1
+    runif(24, 70, 110),  # Zone 2
+    runif(24, 60, 100),  # Zone 3
+    runif(24, 50, 90),   # Zone 4
+    runif(24, 40, 80),   # Zone 5
+    runif(24, 30, 70),   # Zone 6
+    runif(24, 20, 60)    # Zone 7
+  )
+)
+
+data_projected <- data.frame(
+  Hour = rep(0:23, 7),  # Same hours for the projected data
+  climate_zone = rep(paste("Zone", 1:7), each = 24),  # 7 climate zones
+  energy_consumption = c(
+    runif(24, 100, 140),  # Zone 1 (projected increase)
+    runif(24, 90, 130),   # Zone 2
+    runif(24, 80, 120),   # Zone 3
+    runif(24, 70, 110),   # Zone 4
+    runif(24, 60, 100),   # Zone 5
+    runif(24, 50, 90),    # Zone 6
+    runif(24, 40, 80)     # Zone 7
+  )
+)
+
+# Calculate average energy consumption for current and projected data
+avg_current <- data_current %>%
+  group_by(Hour) %>%
+  summarise(avg_energy = mean(energy_consumption))
+
+avg_projected <- data_projected %>%
+  group_by(Hour) %>%
+  summarise(avg_energy = mean(energy_consumption))
+
+# Combine the two datasets for plotting
+avg_data <- bind_rows(
+  avg_current %>% mutate(type = "Current"),
+  avg_projected %>% mutate(type = "Projected")
+)
+
+# Create the comparison line graph
+ggplot(avg_data, aes(x = Hour, y = avg_energy, color = type)) +
+  geom_line(size = 1) +  # Add lines for each type
+  geom_point(size = 2) +  # Optional: Add points for clarity
+  labs(
+    title = "Comparison of Average Energy Consumption",
+    x = "Hour",
+    y = "Average Energy Consumption (kWh)",
+    color = "Scenario"
+  ) +
+  scale_color_manual(values = c("Current" = "blue", "Projected" = "red")) +  # Custom colors
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),  # Enhance title
+    axis.text = element_text(size = 12),  # Resize axis text
+    axis.title = element_text(size = 14)  # Resize axis titles
+  )
+```

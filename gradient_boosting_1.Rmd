@@ -1,0 +1,210 @@
+---
+title: "Gradient Boost for Hot Humid Zone"
+author: "Ishaan Lodhi"
+date: "2024-12-04"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(arrow)
+library(xgboost)
+library(tidyverse)
+```
+
+# Read the file in
+```{r}
+model_df <- read_parquet("/Users/ishaan/Downloads/july_data.parquet")
+```
+
+#Recast time as datetime, extract hour and drop unneccessary columns + columns that did not significantly contribute during PCA
+```{r}
+county_1 <- model_df[model_df$in.building_america_climate_zone == "4", ]
+county_1$time <- as.POSIXct(county_1$time, format = "%Y-%m-%d %H:%M:%S") 
+county_1$Hour <- as.numeric(format(county_1$time, "%H"))  # Extract hour
+
+drop_list <- c("in.county", "time", "bldg_id", "total_energy.site_consumption_intensity", "total_energy.site_consumption", "natural_gas.total_consumption_intensity", "natural_gas.total_consumption", "electricity.total_consumption_intensity", "in.weather_file_longitude", "in.weather_file_latitude", "in.misc_well_pump", "in.misc_gas_lighting", "in.insulation_slab", "in.heating_setpoint_has_offset", "in.has_pv")
+
+county_1 <- county_1[, !colnames(county_1) %in% drop_list]
+```
+
+
+```{r}
+unique(county_1$in.building_america_climate_zone)
+```
+
+# Converting factor columns to numeric
+```{r}
+# List of factor columns
+factor_columns <- as.list(names(county_1)[sapply(county_1, is.factor)])
+
+# Convert factor columns to numeric
+for (col in factor_columns) {
+  if (is.factor(county_1[[col]])) {
+    county_1[[col]] <- as.numeric(as.character(county_1[[col]]))
+  }
+}
+```
+
+```{r}
+str(county_1)
+```
+
+# Create the feature matrix and split it into training and testing sets
+```{r}
+
+useful_columns <- setdiff(names(county_1), c("electricity.total_consumption", "in.building_america_climate_zone"))
+
+features <- county_1[, useful_columns]
+target <- county_1$electricity.total_consumption
+
+# Convert to matrix format required by XGBoost
+features_matrix <- as.matrix(features)
+target_vector <- as.numeric(target)
+
+# Split data into training and testing sets (80/20 split)
+set.seed(123)  # For reproducibility
+train_indices <- sample(1:nrow(features), 0.8 * nrow(features))
+train_features <- features_matrix[train_indices, ]
+train_target <- target_vector[train_indices]
+test_features <- features_matrix[-train_indices, ]
+test_target <- target_vector[-train_indices]
+```
+
+
+#Perform PCA for dimensionality reduction
+```{r}
+# Perform PCA
+pca_result <- prcomp(train_features, scale. = TRUE)
+
+# View the proportion of variance explained by each component
+summary(pca_result)
+```
+
+```{r}
+#loadings <- pca_result$rotation
+
+#top_features_pc1 <- sort(abs(loadings[, 2]), decreasing = TRUE)
+#print(top_features_pc1)
+
+#Columns: "in.weather_file_longitude", "in.weather_file_latitude", "in.misc_well_pump", "in.misc_gas_lighting", "in.insulation_slab", "in.heating_setpoint_has_offset", "in.has_pv" were least contributors during PCA and were thus dropped during feature selection to aid memory efficiency. 
+
+```
+
+#Build and train the model
+```{r}
+# Train XGBoost model
+xgb_model <- xgboost(
+  data = train_features,
+  label = train_target,
+  objective = "reg:squarederror",  # Regression objective
+  nrounds = 60,                   # Number of boosting rounds
+  max_depth = 9,                   # Maximum depth of trees
+  eta = 0.2,                       # Learning rate
+  subsample = 0.7,                 # Fraction of data used for training each tree
+  colsample_bytree = 0.6           # Fraction of features used for training each tree
+)
+
+# Print summary of the model
+print(xgb_model)
+```
+#Test the model
+```{r}
+predictions <- predict(xgb_model, newdata = test_features)
+```
+
+```{r}
+# Calculate R-squared
+ss_residuals <- sum((test_target - predictions)^2)  # Residual Sum of Squares
+ss_total <- sum((test_target - mean(test_target))^2)  # Total Sum of Squares
+
+r_squared <- 1 - (ss_residuals / ss_total)
+cat(" Test R-squared:", r_squared, "\n")
+
+```
+
+```{r}
+calculate_rmse <- function(actual, predicted) {
+  sqrt(mean((actual - predicted)^2))
+}
+
+# Use the function to calculate RMSE for test data
+test_rmse <- calculate_rmse(test_target, predictions)
+
+# Print the RMSE
+cat("Test RMSE:", test_rmse, "\n")
+```
+
+
+#Creating a predictions dataframe for the original data that satisfies project requirements
+```{r}
+full_predictions <- predict(xgb_model, newdata = features_matrix)
+original_predictions_df <- data.frame(county_1$Hour, full_predictions)
+original_predictions_df <- original_predictions_df %>% rename( "Hour" = county_1.Hour , "Predicted_Energy_Consumption" = full_predictions)
+original_predictions_df$Climate_Zone <- 4
+original_predictions_df <- original_predictions_df %>%
+  group_by(Hour) %>%
+  summarise(total_energy = sum(Predicted_Energy_Consumption, na.rm = TRUE) / 31)
+```
+
+
+#Creating a new dataset according to project specs and predicting values based on the best model.
+```{r}
+DryBulbTemperature <- county_1$DryBulbTemperature + 5
+forecast_df <- county_1
+forecast_columns <- setdiff(names(county_1), c("DryBulbTemperature", "electricity.total_consumption", "in.building_america_climate_zone"))
+forecast_df <- forecast_df[, forecast_columns]
+forecast_df <- cbind(forecast_df[, 1:62], DryBulbTemperature, forecast_df[, 63:ncol(forecast_df)])
+forecast_matrix <- as.matrix(forecast_df)
+forecast <- predict(xgb_model, newdata = forecast_matrix)
+```
+
+
+#Creating a predictions dataframe for the new data that satisfies project requirements
+```{r}
+forecast_predictions_df <- data.frame(county_1$Hour, forecast)
+forecast_predictions_df <- forecast_predictions_df %>% rename( "Hour" = county_1.Hour , "Warmer_Predicted_Energy_Consumption" = forecast)
+forecast_predictions_df <- forecast_predictions_df %>%
+  group_by(Hour) %>%
+  summarise(warmer_total_energy = sum(Warmer_Predicted_Energy_Consumption, na.rm = TRUE) / 31)
+```
+
+```{r}
+forecast_predictions_df
+```
+
+
+#Save the model for future use
+```{r}
+# Define the path to your OneDrive folder
+#onedrive_path <- "/Users/ishaan/Downloads/"
+
+# Specify the filename for your model
+#model_filename <- paste0(onedrive_path, "ids_fall_24_xgboost_model.model")
+
+# Save the XGBoost model
+#xgb.save(xgb_model, model_filename)
+
+# Confirm that the model was saved
+#cat("Model saved to:", model_filename, "\n")
+
+```
+
+```{r}
+onedrive_path <- "/Users/ishaan/Downloads/"
+
+filename <- paste0(onedrive_path, "hot_humid_forecast_results.csv")
+
+write_csv(forecast_predictions_df, filename)
+```
+
+```{r}
+onedrive_path <- "/Users/ishaan/Downloads/"
+
+filename <- paste0(onedrive_path, "hot_humid_original_results.csv")
+
+write_csv(original_predictions_df, filename)
+```
